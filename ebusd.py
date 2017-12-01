@@ -33,6 +33,16 @@ def calc_crc(data):
 		crc = crc_table[crc]^ord(ch);
 	return crc
 
+def decode(typ, val):
+	if typ == "tempsensor" or typ == "temp":
+		return float(ord(val[1])*0x100+ord(val[0]))/16
+	if typ == "onoff":
+		if ord(val[0]) > 0:
+			return "ON"
+		else:
+			return "OFF"
+	return val.encode("hex")
+
 class Client(Thread):
 	def __init__(self):
 		self.s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -42,13 +52,13 @@ class Client(Thread):
 
 	def msg_send(self, msg):
 		msg = msg + chr(calc_crc(msg))
-		print "sending", msg.encode("hex")
 		self.s.send(msg)
 		while True:
 			for frame in self.frames:
 				if frame[1:3] == msg[1:3]: #TODO: match longer
 					self.frames.remove(frame)
-					return frame
+					print frame.encode("hex")
+					return frame[len(msg):]
 
 	def run(self):
 		while True:
@@ -71,15 +81,50 @@ client = Client()
 client.daemon = True
 client.start()
 
+params = {}
+
 with open(CONFIG, 'rb') as csvfile:
 	spamreader = csv.reader(csvfile, delimiter=',', quotechar='"')
 	for row in spamreader:
-		try:
-			print row[2],row[7],client.msg_send("\x31\x08\xb5\x09\x03\x0d"+row[7].decode("hex")).encode("hex")
-		except:
-			pass
+		if row[0][0] != '#':
+			params[row[2]] = {
+				"name": row[2],
+				"id": row[7].decode("hex"),
+				"type": row[10]
+			}
+				
+
+print params
+
+wanted = [ 
+	"HwcTemp", 
+	"StorageTemp", 
+#	"FlowTempDesired", 
+#	"WP", 
+#	"CirPump", 
+#	"PumpPower", 
+	"DCRoomthermostat",
+#	"FanSpeed",
+	"HwcDemand"
+]
 
 while True:
-	time.sleep(1)
-	
+	for key,record in params.iteritems():
+			if key not in wanted:
+				continue
+			msg = "\x31\x08\xb5\x09\x03\x0d"+record["id"]
+			#print msg.encode("hex")
+			result = client.msg_send(msg)
+			confirm = "!!"
+			lng = 0
+			data = ""
+			if result[0] == '\x00':
+				confirm = "OK"
+				lng = ord(result[1])
+				data = result[2:]
+			#print "receive", result.encode("hex")
+			print record["name"], record["type"], confirm
+			if confirm == "OK":
+				print decode(record["type"], data)
+			print
 
