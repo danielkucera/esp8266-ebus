@@ -178,6 +178,13 @@ func request_raw(request []byte) *Request {
 	return req
 }
 
+func request_metric(metric Metric) *Request {
+	log.Print("requesting %s", metric)
+	req_bytes := append([]byte {0x31, 0x08, 0xb5, 0x09, 0x03, 0x0d }, metric.id...)
+	req := request_raw(req_bytes)
+	return req
+}
+
 func parse_response(data []byte, format string) string {
 	switch format {
 	case "onoff":
@@ -203,10 +210,7 @@ func handle_raw(w http.ResponseWriter, r *http.Request) {
 func handle_get(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	metric := config[vars["metric"]]
-	log.Print(vars["metric"], metric)
-	req_bytes := append([]byte {0x31, 0x08, 0xb5, 0x09, 0x03, 0x0d }, metric.id...)
-	log.Print("waiting res")
-	req := request_raw(req_bytes)
+	req := request_metric(metric)
 	w.Write([]byte(parse_response(req.Response(), metric.format)))
 }
 
