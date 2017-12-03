@@ -27,6 +27,21 @@ type Metric struct {
 	format	string
 }
 
+type Request struct {
+	req	[]byte
+	start	*Frame
+	res	[]byte
+	crcOk	bool
+	finished bool
+}
+
+func (r *Request) Response() []byte {
+	for !r.finished {
+		time.Sleep(100*time.Millisecond)
+	}
+	return r.res
+}
+
 var send_queue chan []byte
 var cur_frame *Frame
 var config map[string]Metric
@@ -118,27 +133,49 @@ func get_next_frame(frame *Frame) *Frame {
 	return frame.next
 }
 
-func request_raw(request []byte) []byte {
-	search_start := cur_frame
-	request = append(request, calc_crc(request))
-	rqlen := len(request)
-	send_queue <- request
-	frame := get_frame_match(search_start, request[:rqlen-1]).data
-	if frame[rqlen] != 0x00 || len(frame) < rqlen+2 {
-		return []byte{0x00}
+func find_response(req *Request) {
+	rqlen := len(req.req)
+	defer func() { req.finished = true }()
+
+	frame := get_frame_match(req.start, req.req).data
+
+	if len(frame) < rqlen + 3 {
+		log.Print("frame too short")
 	}
-	rest := frame[rqlen+1:]
+
+	if frame[rqlen-1] != 0x00 {
+		log.Print("request NACK-ed %d %x", rqlen, frame)
+		return
+	}
+
+	rest := frame[rqlen+2:]
 	rtlen := len(rest)
-	rslen := int(frame[rqlen+1])
-	if rtlen < rslen + 2 {
-		return []byte{0x00}
+	rslen := int(rest[0])
+	if rtlen < rslen + 1 {
+		log.Print("frame too short")
+		return
 	}
+
 	resp := rest[:rslen+1]
+	log.Printf("respaaaa %x", resp)
+	req.res = resp
 	if rest[rslen+1] == calc_crc(resp) {
 		log.Printf("CRC valid")
+		req.crcOk = true
 	}
 	log.Printf("resp %x", resp)
-	return resp
+	return
+}
+
+func request_raw(request []byte) *Request {
+	req := &Request {
+		start: cur_frame,
+		req: request,
+	}
+	request = append(request, calc_crc(request))
+	send_queue <- request
+	go find_response(req)
+	return req
 }
 
 func parse_response(data []byte, format string) string {
@@ -160,7 +197,7 @@ func parse_response(data []byte, format string) string {
 func handle_raw(w http.ResponseWriter, r *http.Request) {
 	log.Print("http request")
 	request := []byte{0x31, 0x08, 0xb5, 0x09, 0x03, 0x0d, 0x0E, 0x00}
-	w.Write(request_raw(request))
+	w.Write(request_raw(request).Response())
 }
 
 func handle_get(w http.ResponseWriter, r *http.Request) {
@@ -168,8 +205,9 @@ func handle_get(w http.ResponseWriter, r *http.Request) {
 	metric := config[vars["metric"]]
 	log.Print(vars["metric"], metric)
 	req_bytes := append([]byte {0x31, 0x08, 0xb5, 0x09, 0x03, 0x0d }, metric.id...)
-	res_bytes := request_raw(req_bytes)
-	w.Write([]byte(parse_response(res_bytes, metric.format)))
+	log.Print("waiting res")
+	req := request_raw(req_bytes)
+	w.Write([]byte(parse_response(req.Response(), metric.format)))
 }
 
 func load_config(file string){
@@ -192,10 +230,15 @@ func load_config(file string){
 
 }
 
+func update_loop() {
+}
+
 func main() {
 	load_config("../bai.0010015600.inc")
 	send_queue = make(chan []byte, 5)
 	go handle_conn()
+
+	go update_loop()
 
 	r := mux.NewRouter()
 	// Routes consist of a path and a handler function.
