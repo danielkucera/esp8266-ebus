@@ -202,6 +202,8 @@ func parse_response(data []byte, format string) string {
 		} else {
 			return "1"
 		}
+	case "tempmirrorsensor":
+		fallthrough
 	case "tempsensor":
 		fallthrough
 	case "temp":
