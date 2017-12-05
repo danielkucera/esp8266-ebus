@@ -166,8 +166,9 @@ func find_response(req *Request) {
 	resp := rest[:rslen+1]
 	req.res = resp
 	if rest[rslen+1] == calc_crc(resp) {
-		log.Printf("CRC valid")
 		req.crcOk = true
+	} else {
+		log.Printf("CRC INVALID!!!")
 	}
 	log.Printf("resp %x", resp)
 	return
