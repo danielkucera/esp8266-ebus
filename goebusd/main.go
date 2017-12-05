@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"bufio"
 	"bytes"
 	"encoding/csv"
@@ -191,19 +192,22 @@ func request_metric(metric Metric) *Request {
 }
 
 func parse_response(data []byte, format string) string {
+	buf := bytes.NewReader(data[1:])
+	var UInt16 uint16
 	switch format {
 	case "onoff":
 		if data[1] == 0 {
-			return "off"
+			return "0"
 		} else {
-			return "on"
+			return "1"
 		}
 	case "tempsensor":
 		fallthrough
 	case "temp":
-		return fmt.Sprintf("%f", (int(data[1])*0x100+int(data[0]))/16)
+		binary.Read(buf, binary.LittleEndian, &UInt16)
+		return fmt.Sprintf("%f", float32(UInt16)/16)
 	}
-	return "unknown format"
+	return fmt.Sprintf("unknown format: %x", data)
 }
 
 func handle_raw(w http.ResponseWriter, r *http.Request) {
@@ -216,7 +220,7 @@ func handle_get(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	metric := config[vars["metric"]]
 	req := request_metric(metric)
-	w.Write([]byte(parse_response(req.Response(), metric.format)))
+	w.Write([]byte(parse_response(req.Response(), metric.format)+"\n"))
 }
 
 func load_config(file string){
