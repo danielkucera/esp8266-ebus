@@ -239,7 +239,7 @@ func load_config(file string){
 			continue
 		}
 		hex_id, _ := hex.DecodeString(line[7])
-		config[line[2]] = Metric{ id: hex_id, format: line[10] }
+		config[line[2]] = Metric{ name: line[2], id: hex_id, format: line[10] }
 	}
 
 	log.Print(config)
