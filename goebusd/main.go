@@ -90,7 +90,6 @@ func handle_conn(){
 
 	//conn.SetReadDeadline(time.Time(0))
 	reader := bufio.NewReader(conn)
-	cur_frame = &Frame{}
 
 	for {
 
@@ -137,14 +136,21 @@ func find_response(req *Request) {
 	rqlen := len(req.req)
 	defer func() { req.finished = true }()
 
-	frame := get_frame_match(req.start, req.req).data
+	resp_frame := get_frame_match(req.start, req.req)
+	if resp_frame == nil {
+		log.Print("no frame found")
+		return
+	}
+
+	frame := resp_frame.data
 
 	if len(frame) < rqlen + 3 {
 		log.Print("frame too short")
+		return
 	}
 
 	if frame[rqlen-1] != 0x00 {
-		log.Print("request NACK-ed %d %x", rqlen, frame)
+		log.Print("request NACK-ed")
 		return
 	}
 
@@ -157,7 +163,6 @@ func find_response(req *Request) {
 	}
 
 	resp := rest[:rslen+1]
-	log.Printf("respaaaa %x", resp)
 	req.res = resp
 	if rest[rslen+1] == calc_crc(resp) {
 		log.Printf("CRC valid")
@@ -173,8 +178,8 @@ func request_raw(request []byte) *Request {
 		req: request,
 	}
 	request = append(request, calc_crc(request))
-	send_queue <- request
 	go find_response(req)
+	send_queue <- request
 	return req
 }
 
@@ -235,14 +240,20 @@ func load_config(file string){
 }
 
 func update_loop() {
+	for _,metric := range config {
+		request_metric(metric)
+		time.Sleep(100*time.Millisecond)
+	}
+	time.Sleep(30*time.Second)
 }
 
 func main() {
 	load_config("../bai.0010015600.inc")
 	send_queue = make(chan []byte, 5)
+	cur_frame = &Frame{}
 	go handle_conn()
 
-	go update_loop()
+	//go update_loop()
 
 	r := mux.NewRouter()
 	// Routes consist of a path and a handler function.
