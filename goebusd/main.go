@@ -209,6 +209,8 @@ func parse_response(data []byte, format string) string {
 	case "temp":
 		binary.Read(buf, binary.LittleEndian, &UInt16)
 		return fmt.Sprintf("%f", float32(UInt16)/16)
+	case "UCH":
+		return fmt.Sprintf("%d", int(data[1]))
 	}
 	return fmt.Sprintf("unknown format: %x", data)
 }
