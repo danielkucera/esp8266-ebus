@@ -26,6 +26,8 @@ type Metric struct {
 	name	string
 	id	[]byte
 	format	string
+	last	string
+	updated time.Time
 }
 
 type Request struct {
@@ -50,7 +52,7 @@ func (r *Request) Response() ( []byte, error ) {
 
 var send_queue chan []byte
 var cur_frame *Frame
-var config map[string]Metric
+var config map[string]*Metric
 
 var crc_table = []byte{0x00, 0x9b, 0xad, 0x36, 0xc1, 0x5a, 0x6c, 0xf7, 0x19, 0x82, 0xb4, 0x2f, 0xd8, 0x43, 0x75, 0xee,
 	0x32, 0xa9, 0x9f, 0x04, 0xf3, 0x68, 0x5e, 0xc5, 0x2b, 0xb0, 0x86, 0x1d, 0xea, 0x71, 0x47, 0xdc,
@@ -190,10 +192,19 @@ func request_raw(request []byte) *Request {
 	return req
 }
 
-func request_metric(metric Metric) *Request {
+func cache_metric(req *Request, metric *Metric) {
+	res, err := req.Response()
+	if err == nil {
+		metric.last = parse_response(res, metric.format)
+		metric.updated = time.Now()
+	}
+}
+
+func request_metric(metric *Metric) *Request {
 	log.Print("requesting %s", metric)
 	req_bytes := append([]byte {0x31, 0x08, 0xb5, 0x09, 0x03, 0x0d }, metric.id...)
 	req := request_raw(req_bytes)
+	go cache_metric(req, metric)
 	return req
 }
 
@@ -244,7 +255,7 @@ func handle_get(w http.ResponseWriter, r *http.Request) {
 func load_config(file string){
 	csvFile, _ := os.Open(file)
 	reader := csv.NewReader(bufio.NewReader(csvFile))
-	config = make(map[string]Metric)
+	config = make(map[string]*Metric)
 	for {
 		line, error := reader.Read()
 		if error == io.EOF {
@@ -254,7 +265,7 @@ func load_config(file string){
 			continue
 		}
 		hex_id, _ := hex.DecodeString(line[7])
-		config[line[2]] = Metric{ name: line[2], id: hex_id, format: line[10] }
+		config[line[2]] = &Metric{ name: line[2], id: hex_id, format: line[10] }
 	}
 
 	log.Print(config)
