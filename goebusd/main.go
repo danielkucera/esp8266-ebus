@@ -247,10 +247,25 @@ func handle_get(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	metric := config[vars["metric"]]
 	req := request_metric(metric)
-	resp,err := req.Response()
-	if err == nil {
-		w.Write([]byte(parse_response(resp, metric.Format)+"\n"))
+
+	c1 := make(chan []byte, 1)
+	go func() {
+		rsp,err := req.Response()
+		if err == nil {
+			c1 <- rsp
+		}
+	}()
+
+	var out string
+
+	select {
+	case resp := <-c1:
+		out = parse_response(resp, metric.Format)
+	case <-time.After(time.Second * 2):
+		out = metric.Last
 	}
+
+	w.Write([]byte(out+"\n"))
 }
 
 func handle_config(w http.ResponseWriter, r *http.Request) {
