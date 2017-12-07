@@ -34,13 +34,18 @@ type Request struct {
 	res	[]byte
 	crcOk	bool
 	finished bool
+	err	string
 }
 
-func (r *Request) Response() []byte {
+func (r *Request) Response() ( []byte, error ) {
 	for !r.finished {
 		time.Sleep(100*time.Millisecond)
 	}
-	return r.res
+	if r.err == "" {
+		return r.res, nil
+	} else {
+		return nil, fmt.Errorf(r.err)
+	}
 }
 
 var send_queue chan []byte
@@ -139,19 +144,19 @@ func find_response(req *Request) {
 
 	resp_frame := get_frame_match(req.start, req.req)
 	if resp_frame == nil {
-		log.Print("no frame found")
+		req.err = "no frame found"
 		return
 	}
 
 	frame := resp_frame.data
 
 	if len(frame) < rqlen + 3 {
-		log.Print("frame too short")
+		req.err = "frame too short"
 		return
 	}
 
 	if frame[rqlen-1] != 0x00 {
-		log.Print("request NACK-ed")
+		req.err = "request NACK-ed"
 		return
 	}
 
@@ -159,7 +164,7 @@ func find_response(req *Request) {
 	rtlen := len(rest)
 	rslen := int(rest[0])
 	if rtlen < rslen + 1 {
-		log.Print("frame too short")
+		req.err = "frame too short"
 		return
 	}
 
@@ -168,7 +173,7 @@ func find_response(req *Request) {
 	if rest[rslen+1] == calc_crc(resp) {
 		req.crcOk = true
 	} else {
-		log.Printf("CRC INVALID!!!")
+		req.err = "CRC INVALID!!!"
 	}
 	log.Printf("resp %x", resp)
 	return
@@ -218,14 +223,18 @@ func parse_response(data []byte, format string) string {
 func handle_raw(w http.ResponseWriter, r *http.Request) {
 	log.Print("http request")
 	request := []byte{0x31, 0x08, 0xb5, 0x09, 0x03, 0x0d, 0x0E, 0x00}
-	w.Write(request_raw(request).Response())
+	resp,_ := request_raw(request).Response()
+	w.Write(resp)
 }
 
 func handle_get(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	metric := config[vars["metric"]]
 	req := request_metric(metric)
-	w.Write([]byte(parse_response(req.Response(), metric.format)+"\n"))
+	resp,err := req.Response()
+	if err == nil {
+		w.Write([]byte(parse_response(resp, metric.format)+"\n"))
+	}
 }
 
 func load_config(file string){
