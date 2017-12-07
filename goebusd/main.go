@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"bufio"
 	"bytes"
 	"encoding/csv"
@@ -23,11 +24,11 @@ type Frame struct {
 }
 
 type Metric struct {
-	name	string
-	id	[]byte
-	format	string
-	last	string
-	updated time.Time
+	Name	string
+	Id	[]byte
+	Format	string
+	Last	string
+	Updated time.Time
 }
 
 type Request struct {
@@ -195,14 +196,14 @@ func request_raw(request []byte) *Request {
 func cache_metric(req *Request, metric *Metric) {
 	res, err := req.Response()
 	if err == nil {
-		metric.last = parse_response(res, metric.format)
-		metric.updated = time.Now()
+		metric.Last = parse_response(res, metric.Format)
+		metric.Updated = time.Now()
 	}
 }
 
 func request_metric(metric *Metric) *Request {
-	log.Print("requesting %s", metric)
-	req_bytes := append([]byte {0x31, 0x08, 0xb5, 0x09, 0x03, 0x0d }, metric.id...)
+	log.Printf("requesting %v+", metric)
+	req_bytes := append([]byte {0x31, 0x08, 0xb5, 0x09, 0x03, 0x0d }, metric.Id...)
 	req := request_raw(req_bytes)
 	go cache_metric(req, metric)
 	return req
@@ -248,8 +249,13 @@ func handle_get(w http.ResponseWriter, r *http.Request) {
 	req := request_metric(metric)
 	resp,err := req.Response()
 	if err == nil {
-		w.Write([]byte(parse_response(resp, metric.format)+"\n"))
+		w.Write([]byte(parse_response(resp, metric.Format)+"\n"))
 	}
+}
+
+func handle_config(w http.ResponseWriter, r *http.Request) {
+	enc := json.NewEncoder(w)
+	enc.Encode(config)
 }
 
 func load_config(file string){
@@ -265,7 +271,7 @@ func load_config(file string){
 			continue
 		}
 		hex_id, _ := hex.DecodeString(line[7])
-		config[line[2]] = &Metric{ name: line[2], id: hex_id, format: line[10] }
+		config[line[2]] = &Metric{ Name: line[2], Id: hex_id, Format: line[10] }
 	}
 
 	log.Print(config)
@@ -291,6 +297,7 @@ func main() {
 	r := mux.NewRouter()
 	// Routes consist of a path and a handler function.
 	r.HandleFunc("/raw", handle_raw)
+	r.HandleFunc("/config", handle_config)
 	r.HandleFunc("/get/{metric}", handle_get)
 
 	// Bind to a port and pass our router in
