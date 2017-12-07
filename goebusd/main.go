@@ -200,6 +200,7 @@ func request_metric(metric Metric) *Request {
 func parse_response(data []byte, format string) string {
 	buf := bytes.NewReader(data[1:])
 	var UInt16 uint16
+	var UInt32 uint32
 	switch format {
 	case "onoff":
 		if data[1] == 0 {
@@ -216,6 +217,9 @@ func parse_response(data []byte, format string) string {
 		return fmt.Sprintf("%f", float32(UInt16)/16)
 	case "UCH":
 		return fmt.Sprintf("%d", int(data[1]))
+	case "ULG":
+		binary.Read(buf, binary.LittleEndian, &UInt32)
+		return fmt.Sprintf("%d", UInt32)
 	}
 	return fmt.Sprintf("unknown format: %x", data)
 }
