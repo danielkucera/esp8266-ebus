@@ -81,42 +81,76 @@ func calc_crc(data []byte) byte {
 	return crc
 }
 
-func read_frame(reader *bufio.Reader) []byte {
-	var B byte
-	var frame []byte
-	for B != 0xaa {
-		B,_ = reader.ReadByte()
-		frame = append(frame, B)
-	}
-	return frame
-}
-
 func handle_conn(){
-	conn, err := net.Dial("tcp", "192.168.0.115:3333")
-	if err != nil {
-		log.Panic(err)
-	}
 
-	//conn.SetReadDeadline(time.Time(0))
-	reader := bufio.NewReader(conn)
+	timeoutDuration := 5 * time.Second
+	exited := make(chan int)
 
-	for {
+	var conn net.Conn
+	var rw *bufio.ReadWriter
 
-		frame := read_frame(reader)
+	go func() {
+		var err error
+		for {
+			conn, err = net.Dial("tcp", "192.168.0.115:3333")
+			if err != nil {
+				log.Print(err)
+				time.Sleep(time.Second)
+				continue
+			}
+			rw = bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
+			log.Print("connected ok")
+			<-exited
+		}
+	}()
 
-		select {
-		case request := <-send_queue:
+	go func() {
+		for {
+			request := <-send_queue
 			log.Printf("send  %x", request)
-			conn.Write(request)
-		default:
+			go func() {
+				rw.Write(request)
+				rw.Flush()
+				log.Printf("sent  %x", request)
+			}()
 		}
+	}()
 
-		if len(frame) > 1 {
-			log.Printf("frame %x", frame)
-			cur_frame.next = &Frame{data: frame, ts: time.Now()}
-			cur_frame=cur_frame.next
+	go func() {
+		frames := 0
+		last := time.Now()
+		for {
+			var B byte
+			var frame []byte
+			var err error
+			for B != 0xaa && err == nil {
+				for rw == nil || conn == nil {
+					time.Sleep(time.Millisecond)
+				}
+				conn.SetReadDeadline(time.Now().Add(timeoutDuration))
+				B, err = rw.ReadByte()
+				frame = append(frame, B)
+			}
+
+			if err != nil {
+				conn = nil
+				exited <-1
+				continue
+			}
+			frames++
+			if time.Now().Sub(last) > time.Second {
+				last = time.Now()
+				log.Printf("FPS: %d", frames)
+				frames = 0
+			}
+			if len(frame) > 1 {
+				log.Printf("frame %x", frame)
+				cur_frame.next = &Frame{data: frame, ts: time.Now()}
+				cur_frame=cur_frame.next
+			}
 		}
-	}
+	}()
+
 }
 
 func get_frame_match(start *Frame, data []byte) *Frame {
