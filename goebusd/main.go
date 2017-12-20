@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 	"github.com/gorilla/mux"
 )
@@ -34,6 +35,7 @@ type Metric struct {
 type Request struct {
 	req	[]byte
 	start	*Frame
+	frame	*Frame
 	res	[]byte
 	crcOk	bool
 	finished bool
@@ -185,6 +187,7 @@ func find_response(req *Request) {
 		return
 	}
 
+	req.frame = resp_frame
 	frame := resp_frame.data
 
 	if len(frame) < rqlen + 3 {
@@ -240,6 +243,14 @@ func request_metric(metric *Metric) *Request {
 	req_bytes := append([]byte {0x31, 0x08, 0xb5, 0x09, 0x03, 0x0d }, metric.Id...)
 	req := request_raw(req_bytes)
 	go cache_metric(req, metric)
+	return req
+}
+
+func set_metric(metric *Metric, value byte) *Request {
+	log.Printf("setting %v+", metric)
+	req_bytes := append([]byte {0x31, 0x08, 0xb5, 0x09, 0x04, 0x0e }, metric.Id...)
+	req_bytes = append(req_bytes, value)
+	req := request_raw(req_bytes)
 	return req
 }
 
@@ -304,6 +315,22 @@ func handle_get(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(out+"\n"))
 }
 
+func handle_set(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	metric := config[vars["metric"]]
+	valint,_ := strconv.Atoi(vars["value"])
+	value := byte(valint)
+	req := set_metric(metric, value)
+
+	req.Response()
+
+	if (req.frame != nil) {
+		w.Write([]byte(fmt.Sprintf("resp: %x\n", req.frame.data)))
+	} else {
+		w.Write([]byte(fmt.Sprintf("error: %s\n", req.err)))
+	}
+}
+
 func handle_config(w http.ResponseWriter, r *http.Request) {
 	enc := json.NewEncoder(w)
 	enc.Encode(config)
@@ -350,6 +377,7 @@ func main() {
 	r.HandleFunc("/raw", handle_raw)
 	r.HandleFunc("/config", handle_config)
 	r.HandleFunc("/get/{metric}", handle_get)
+	r.HandleFunc("/set/{metric}/{value}", handle_set)
 
 	// Bind to a port and pass our router in
 	log.Fatal(http.ListenAndServe(":8085", r))
