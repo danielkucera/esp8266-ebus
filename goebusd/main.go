@@ -284,10 +284,17 @@ func parse_response(data []byte, format string) string {
 }
 
 func handle_raw(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	datastring := vars["data"]
+	data, _ := hex.DecodeString(datastring)
 	log.Print("http request")
-	request := []byte{0x31, 0x08, 0xb5, 0x09, 0x03, 0x0d, 0x0E, 0x00}
-	resp,_ := request_raw(request).Response()
-	w.Write(resp)
+	req := request_raw(data)
+	req.Response()
+	if (req.frame != nil) {
+		w.Write([]byte(fmt.Sprintf("resp: %x\n", req.frame.data)))
+	} else {
+		w.Write([]byte(fmt.Sprintf("error: %s\n", req.err)))
+	}
 }
 
 func handle_get(w http.ResponseWriter, r *http.Request) {
@@ -374,7 +381,7 @@ func main() {
 
 	r := mux.NewRouter()
 	// Routes consist of a path and a handler function.
-	r.HandleFunc("/raw", handle_raw)
+	r.HandleFunc("/raw/{data}", handle_raw)
 	r.HandleFunc("/config", handle_config)
 	r.HandleFunc("/get/{metric}", handle_get)
 	r.HandleFunc("/set/{metric}/{value}", handle_set)
