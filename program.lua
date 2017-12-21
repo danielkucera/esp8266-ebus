@@ -10,7 +10,7 @@ pos = 0
 request = ""
 frame = ""
 
-function analyze_frame (frm)
+function analyze_frame (conn, frm)
 	reql = request:len()
 	if frm:len() < reql + 2 then
 		-- still waiting for data (request, acl, response len)
@@ -22,18 +22,19 @@ function analyze_frame (frm)
 	end
 	if string.byte(frm:sub(reql+1, reql+1)) ~= 0x00 then
 		-- recipient did not ACK
-		return 1
+		return 2
 	end
-    respl = string.byte(frm:sub(reql+2))
-	if frm:len() < reql + respl then
+	respl = string.byte(frm:sub(reql+2))
+	expl = reql + 2 + respl + 1
+	if frm:len() < expl then
 		-- still waiting for data (request, acl, response)
 		return 0
 	end
 	-- TODO: verify CRC
-	uart.write(0, "\0")
+	uart.write(0, string.char(0x00))
 
 	uart.write(0, string.char(0xaa))
-	return 1
+	return 3
 end
 
 tmr.alarm(0,200,0,function() -- run after a delay
@@ -60,7 +61,8 @@ tmr.alarm(0,200,0,function() -- run after a delay
         		end
         	elseif state == 3 then
         		frame = frame..data
-        		if analyze_frame(frame) then
+        		res = analyze_frame(conn, frame)
+        		if res > 0 then
         			state = 0
         		end
         	end
