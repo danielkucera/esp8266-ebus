@@ -44,7 +44,7 @@ type Request struct {
 
 func (r *Request) Response() ( []byte, error ) {
 	for !r.finished {
-		time.Sleep(100*time.Millisecond)
+		time.Sleep(1*time.Millisecond)
 	}
 	if r.err == "" {
 		return r.res, nil
@@ -172,13 +172,13 @@ func get_frame_match(start *Frame, data []byte) *Frame {
 
 func get_next_frame(frame *Frame) *Frame {
 	for frame.next == nil {
-		time.Sleep(10*time.Millisecond)
+		time.Sleep(1*time.Millisecond)
 	}
 	return frame.next
 }
 
 func find_response(req *Request) {
-	rqlen := len(req.req)
+	rqlen := len(req.req) - 1
 	defer func() { req.finished = true }()
 
 	resp_frame := get_frame_match(req.start, req.req)
@@ -220,11 +220,15 @@ func find_response(req *Request) {
 }
 
 func request_raw(request []byte) *Request {
+	request = append(request, calc_crc(request))
+	return request_raw_crc(request)
+}
+
+func request_raw_crc(request []byte) *Request {
 	req := &Request {
 		start: cur_frame,
 		req: request,
 	}
-	request = append(request, calc_crc(request))
 	go find_response(req)
 	send_queue <- request
 	return req
@@ -371,11 +375,89 @@ func update_loop() {
 	time.Sleep(30*time.Second)
 }
 
+func serve_client(conn net.Conn) {
+	var buf bytes.Buffer
+	go func() {
+		b := make([]byte, 1)
+		for {
+			l,_ := conn.Read(b)
+			if l > 0 {
+				//log.Printf("sth read %d %x\n", l, b)
+				buf.Write(b[0:l])
+				conn.Write(b[0:l])
+			}
+		}
+	}()
+	for {
+		conn.Write([]byte{0xaa})
+		waitStart := time.Now()
+		for time.Since(waitStart) < 1000*time.Millisecond {
+			for buf.Len() > 0 && buf.Len() < 5 {
+				if time.Since(waitStart) > 1000*time.Millisecond {
+					buf.Reset()
+					break
+				}
+				time.Sleep(time.Millisecond)
+			}
+			if buf.Len() > 4 {
+				bt := buf.Next(5)
+				log.Printf("got tcp byte %x", bt)
+
+				toRead := (int)(bt[4]) + 1
+
+				log.Printf("expecting %d more bytes", toRead)
+
+				bt = append(bt, buf.Next(toRead)...)
+
+				log.Printf("complete frame %x", bt)
+
+				conn.Write([]byte{0x00})
+
+				req := request_raw_crc(bt)
+
+				rsp, err := req.Response()
+
+				log.Printf("request ended with %s sending %x", err, rsp)
+
+				if err == nil {
+					respLen := (int)(req.frame.data[5+toRead+1])
+					respData := append(req.frame.data[5+toRead+1:5+toRead+respLen+3])
+					log.Printf("TCP send len %s data: %x", respLen, respData)
+					for i:=0; i<len(respData); i++ {
+						conn.Write([]byte{respData[i]})
+					}
+				}
+				for (time.Since(waitStart) < 1000*time.Millisecond) && (buf.Len() < 1) {
+					time.Sleep(time.Millisecond)
+				}
+				ack, _ := buf.ReadByte()
+				if ack == 0 {
+					log.Printf("TCP: client acked data")
+				}
+				break
+			} else {
+				time.Sleep(time.Millisecond)
+			}
+		}
+	}
+
+}
+
+func tcp_server() {
+	ln, _ := net.Listen("tcp", ":5000")
+
+	for {
+		conn, _ := ln.Accept()
+		go serve_client(conn)
+	}
+}
+
 func main() {
 	load_config("../bai.0010015600.inc")
 	send_queue = make(chan []byte, 5)
 	cur_frame = &Frame{}
 	go handle_conn()
+	go tcp_server()
 
 	//go update_loop()
 
