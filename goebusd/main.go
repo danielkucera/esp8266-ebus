@@ -195,8 +195,8 @@ func find_response(req *Request) {
 		return
 	}
 
-	if frame[rqlen-1] != 0x00 {
-		req.err = "request NACK-ed"
+	if frame[rqlen+1] != 0x00 {
+		req.err = "request NACK-ed by " + string(int(frame[rqlen+1]))
 		return
 	}
 
@@ -401,38 +401,40 @@ func serve_client(conn net.Conn) {
 			}
 			if buf.Len() > 4 {
 				bt := buf.Next(5)
-				log.Printf("got tcp byte %x", bt)
+				log.Printf("TCP: got tcp byte %x", bt)
 
 				toRead := (int)(bt[4]) + 1
 
-				log.Printf("expecting %d more bytes", toRead)
+				log.Printf("TCP: expecting %d more bytes", toRead)
 
 				bt = append(bt, buf.Next(toRead)...)
 
-				log.Printf("complete frame %x", bt)
+				log.Printf("TCP: complete frame %x", bt)
 
-				conn.Write([]byte{0x00})
 
 				req := request_raw_crc(bt)
 
 				rsp, err := req.Response()
 
-				log.Printf("request ended with %s sending %x", err, rsp)
+				log.Printf("TCP: request ended with %s sending %x", err, rsp)
 
 				if err == nil {
 					respLen := (int)(req.frame.data[5+toRead+1])
-					respData := append(req.frame.data[5+toRead+1:5+toRead+respLen+3])
-					log.Printf("TCP send len %s data: %x", respLen, respData)
+					respData := append(req.frame.data[5+toRead:5+toRead+respLen+3])
+					log.Printf("TCP: send len %s data: %x", respLen, respData)
 					for i:=0; i<len(respData); i++ {
 						conn.Write([]byte{respData[i]})
 					}
-				}
-				for (time.Since(waitStart) < 1000*time.Millisecond) && (buf.Len() < 1) {
-					time.Sleep(time.Millisecond)
-				}
-				ack, _ := buf.ReadByte()
-				if ack == 0 {
-					log.Printf("TCP: client acked data")
+
+					for (time.Since(waitStart) < 1000*time.Millisecond) && (buf.Len() < 1) {
+						time.Sleep(time.Millisecond)
+					}
+					ack, _ := buf.ReadByte()
+					if ack == 0 {
+						log.Printf("TCP: client acked data")
+					}
+				} else {
+					conn.Write([]byte{0xff})
 				}
 				break
 			} else {
