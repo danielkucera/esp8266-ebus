@@ -383,11 +383,25 @@ func update_loop() {
 	time.Sleep(30*time.Second)
 }
 
-func serve_client(conn net.Conn) {
+func read_client(conn net.Conn, bufReader *bufio.Reader) (byte, error){
 	timeoutDuration := 200 * time.Millisecond
 
-	bufReader := bufio.NewReader(conn)
+	conn.SetReadDeadline(time.Now().Add(timeoutDuration))
 
+	B, err := bufReader.ReadByte()
+	if err != nil {
+		//fmt.Println(err)
+		return 0x00, err
+	}
+
+	//time.Sleep(time.Second/300)
+
+	conn.Write([]byte{B})
+	return B, nil
+}
+
+func serve_client(conn net.Conn) {
+	bufReader := bufio.NewReader(conn)
 	buff := make([]byte,32)
 
 	for {
@@ -396,19 +410,12 @@ NewFrame:
 		conn.Write([]byte{0xaa})
 
 		for i := 0; i < flen; i++ {
-
-			conn.SetReadDeadline(time.Now().Add(timeoutDuration))
-
-			B, err := bufReader.ReadByte()
+			B, err := read_client(conn, bufReader)
 			if err != nil {
-				//fmt.Println(err)
 				goto NewFrame
 			}
+
 			buff[i] = B
-
-			//time.Sleep(time.Second/300)
-
-			conn.Write([]byte{B})
 
 			if i == 4 {
 				flen = 6 + int(buff[4])
@@ -417,29 +424,25 @@ NewFrame:
 
 		frame := buff[0:flen]
 
-		log.Printf("client sent  %x", frame)
-
-		conn.Write([]byte{0x00})
+		log.Printf("CLIENT req %x", frame)
 
 		req := request_raw_crc(frame)
 
 		_, err := req.Response()
-		res := req.frame.data[flen+1:]
-		res = res[0:len(res)-2]
-		log.Printf("client res  %x", res)
-		if err == nil {
-			conn.Write(res)
-		}
-
-		conn.SetReadDeadline(time.Now().Add(timeoutDuration))
-		B, err := bufReader.ReadByte()
 		if err != nil {
-			//fmt.Println(err)
-			goto NewFrame
+			conn.Write([]byte{0xff})
+			continue
 		}
-		//time.Sleep(time.Second/300)
-		conn.Write([]byte{B})
 
+
+		res := req.frame.data[flen:]
+		res = res[0:len(res)-2]
+
+		log.Printf("CLIENT res %x", res)
+
+		conn.Write(res)
+
+		read_client(conn, bufReader)
 	}
 
 }
