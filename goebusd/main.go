@@ -181,6 +181,14 @@ func find_response(req *Request) {
 	rqlen := len(req.req) - 1
 	defer func() { req.finished = true }()
 
+	go func() {
+		time.Sleep(500*time.Millisecond)
+		if !req.finished {
+			req.err = "timeout"
+			req.finished = true
+		}
+	}()
+
 	resp_frame := get_frame_match(req.start, req.req)
 	if resp_frame == nil {
 		req.err = "no frame found"
@@ -376,71 +384,62 @@ func update_loop() {
 }
 
 func serve_client(conn net.Conn) {
-	var buf bytes.Buffer
-	go func() {
-		b := make([]byte, 1)
-		for {
-			l,_ := conn.Read(b)
-			if l > 0 {
-				//log.Printf("sth read %d %x\n", l, b)
-				buf.Write(b[0:l])
-				conn.Write(b[0:l])
-			}
-		}
-	}()
+	timeoutDuration := 200 * time.Millisecond
+
+	bufReader := bufio.NewReader(conn)
+
+	buff := make([]byte,32)
+
 	for {
+NewFrame:
+		flen := 5
 		conn.Write([]byte{0xaa})
-		waitStart := time.Now()
-		for time.Since(waitStart) < 1000*time.Millisecond {
-			for buf.Len() > 0 && buf.Len() < 5 {
-				if time.Since(waitStart) > 1000*time.Millisecond {
-					buf.Reset()
-					break
-				}
-				time.Sleep(time.Millisecond)
+
+		for i := 0; i < flen; i++ {
+
+			conn.SetReadDeadline(time.Now().Add(timeoutDuration))
+
+			B, err := bufReader.ReadByte()
+			if err != nil {
+				//fmt.Println(err)
+				goto NewFrame
 			}
-			if buf.Len() > 4 {
-				bt := buf.Next(5)
-				log.Printf("TCP: got tcp byte %x", bt)
+			buff[i] = B
 
-				toRead := (int)(bt[4]) + 1
+			//time.Sleep(time.Second/300)
 
-				log.Printf("TCP: expecting %d more bytes", toRead)
+			conn.Write([]byte{B})
 
-				bt = append(bt, buf.Next(toRead)...)
-
-				log.Printf("TCP: complete frame %x", bt)
-
-
-				req := request_raw_crc(bt)
-
-				rsp, err := req.Response()
-
-				log.Printf("TCP: request ended with %s sending %x", err, rsp)
-
-				if err == nil {
-					respLen := (int)(req.frame.data[5+toRead+1])
-					respData := append(req.frame.data[5+toRead:5+toRead+respLen+3])
-					log.Printf("TCP: send len %s data: %x", respLen, respData)
-					for i:=0; i<len(respData); i++ {
-						conn.Write([]byte{respData[i]})
-					}
-
-					for (time.Since(waitStart) < 1000*time.Millisecond) && (buf.Len() < 1) {
-						time.Sleep(time.Millisecond)
-					}
-					ack, _ := buf.ReadByte()
-					if ack == 0 {
-						log.Printf("TCP: client acked data")
-					}
-				} else {
-					conn.Write([]byte{0xff})
-				}
-				break
-			} else {
-				time.Sleep(time.Millisecond)
+			if i == 4 {
+				flen = 6 + int(buff[4])
 			}
 		}
+
+		frame := buff[0:flen]
+
+		log.Printf("client sent  %x", frame)
+
+		conn.Write([]byte{0x00})
+
+		req := request_raw_crc(frame)
+
+		_, err := req.Response()
+		res := req.frame.data[flen+1:]
+		res = res[0:len(res)-2]
+		log.Printf("client res  %x", res)
+		if err == nil {
+			conn.Write(res)
+		}
+
+		conn.SetReadDeadline(time.Now().Add(timeoutDuration))
+		B, err := bufReader.ReadByte()
+		if err != nil {
+			//fmt.Println(err)
+			goto NewFrame
+		}
+		//time.Sleep(time.Second/300)
+		conn.Write([]byte{B})
+
 	}
 
 }
